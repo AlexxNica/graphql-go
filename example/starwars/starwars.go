@@ -12,7 +12,7 @@ import (
 	graphql "github.com/neelance/graphql-go"
 )
 
-var Schema = `
+var schemaIDL = `
 	schema {
 		query: Query
 		mutation: Mutation
@@ -284,221 +284,177 @@ type review struct {
 
 var reviews = make(map[string][]*review)
 
+var Schema = initSchema()
+
 type Resolver struct{}
 
-func (r *Resolver) Hero(args *struct{ Episode string }) *characterResolver {
-	if args.Episode == "EMPIRE" {
-		return &characterResolver{&humanResolver{humanData["1000"]}}
-	}
-	return &characterResolver{&droidResolver{droidData["2001"]}}
-}
+func initSchema() *graphql.Schema {
+	s := graphql.ParseSchema(schemaIDL)
 
-func (r *Resolver) Reviews(args *struct{ Episode string }) []*reviewResolver {
-	var l []*reviewResolver
-	for _, review := range reviews[args.Episode] {
-		l = append(l, &reviewResolver{review})
-	}
-	return l
-}
-
-func (r *Resolver) Search(args *struct{ Text string }) []*searchResultResolver {
-	var l []*searchResultResolver
-	for _, h := range humans {
-		if strings.Contains(h.Name, args.Text) {
-			l = append(l, &searchResultResolver{&humanResolver{h}})
+	s.Resolver("Query", "hero", func(r *Resolver, args *struct{ Episode string }) interface{} {
+		if args.Episode == "EMPIRE" {
+			return humanData["1000"]
 		}
-	}
-	for _, d := range droids {
-		if strings.Contains(d.Name, args.Text) {
-			l = append(l, &searchResultResolver{&droidResolver{d}})
+		return droidData["2001"]
+	})
+
+	s.Resolver("Query", "reviews", func(r *Resolver, args *struct{ Episode string }) []*review {
+		return reviews[args.Episode]
+	})
+
+	s.Resolver("Query", "search", func(r *Resolver, args *struct{ Text string }) []interface{} {
+		var l []interface{}
+		for _, h := range humans {
+			if strings.Contains(h.Name, args.Text) {
+				l = append(l, h)
+			}
 		}
-	}
-	for _, s := range starships {
-		if strings.Contains(s.Name, args.Text) {
-			l = append(l, &searchResultResolver{&starshipResolver{s}})
+		for _, d := range droids {
+			if strings.Contains(d.Name, args.Text) {
+				l = append(l, d)
+			}
 		}
-	}
-	return l
-}
+		for _, s := range starships {
+			if strings.Contains(s.Name, args.Text) {
+				l = append(l, s)
+			}
+		}
+		return l
+	})
 
-func (r *Resolver) Character(args *struct{ ID graphql.ID }) *characterResolver {
-	if h := humanData[args.ID]; h != nil {
-		return &characterResolver{&humanResolver{h}}
-	}
-	if d := droidData[args.ID]; d != nil {
-		return &characterResolver{&droidResolver{d}}
-	}
-	return nil
-}
-
-func (r *Resolver) Human(args *struct{ ID graphql.ID }) *humanResolver {
-	if h := humanData[args.ID]; h != nil {
-		return &humanResolver{h}
-	}
-	return nil
-}
-
-func (r *Resolver) Droid(args *struct{ ID graphql.ID }) *droidResolver {
-	if d := droidData[args.ID]; d != nil {
-		return &droidResolver{d}
-	}
-	return nil
-}
-
-func (r *Resolver) Starship(args *struct{ ID graphql.ID }) *starshipResolver {
-	if s := starshipData[args.ID]; s != nil {
-		return &starshipResolver{s}
-	}
-	return nil
-}
-
-func (r *Resolver) CreateReview(args *struct {
-	Episode string
-	Review  *reviewInput
-}) *reviewResolver {
-	review := &review{
-		stars:      args.Review.Stars,
-		commentary: args.Review.Commentary,
-	}
-	reviews[args.Episode] = append(reviews[args.Episode], review)
-	return &reviewResolver{review}
-}
-
-type friendsConenctionArgs struct {
-	First *int32
-	After *graphql.ID
-}
-
-type character interface {
-	ID() graphql.ID
-	Name() string
-	Friends() *[]*characterResolver
-	FriendsConnection(*friendsConenctionArgs) (*friendsConnectionResolver, error)
-	AppearsIn() []string
-}
-
-type characterResolver struct {
-	character
-}
-
-func (r *characterResolver) ToHuman() (*humanResolver, bool) {
-	c, ok := r.character.(*humanResolver)
-	return c, ok
-}
-
-func (r *characterResolver) ToDroid() (*droidResolver, bool) {
-	c, ok := r.character.(*droidResolver)
-	return c, ok
-}
-
-type humanResolver struct {
-	h *human
-}
-
-func (r *humanResolver) ID() graphql.ID {
-	return r.h.ID
-}
-
-func (r *humanResolver) Name() string {
-	return r.h.Name
-}
-
-func (r *humanResolver) Height(args *struct{ Unit string }) float64 {
-	return convertLength(r.h.Height, args.Unit)
-}
-
-func (r *humanResolver) Mass() *float64 {
-	if r.h.Mass == 0 {
+	s.Resolver("Query", "character", func(r *Resolver, args *struct{ ID graphql.ID }) interface{} {
+		if h := humanData[args.ID]; h != nil {
+			return h
+		}
+		if d := droidData[args.ID]; d != nil {
+			return d
+		}
 		return nil
-	}
-	f := float64(r.h.Mass)
-	return &f
-}
+	})
 
-func (r *humanResolver) Friends() *[]*characterResolver {
-	return resolveCharacters(r.h.Friends)
-}
+	s.Resolver("Query", "human", func(r *Resolver, args *struct{ ID graphql.ID }) *human {
+		return humanData[args.ID]
+	})
 
-func (r *humanResolver) FriendsConnection(args *friendsConenctionArgs) (*friendsConnectionResolver, error) {
-	return newFriendsConnectionResolver(r.h.Friends, args)
-}
+	s.Resolver("Query", "droid", func(r *Resolver, args *struct{ ID graphql.ID }) *droid {
+		return droidData[args.ID]
+	})
 
-func (r *humanResolver) AppearsIn() []string {
-	return r.h.AppearsIn
-}
+	s.Resolver("Query", "starship", func(r *Resolver, args *struct{ ID graphql.ID }) *starship {
+		return starshipData[args.ID]
+	})
 
-func (r *humanResolver) Starships() *[]*starshipResolver {
-	l := make([]*starshipResolver, len(r.h.Starships))
-	for i, id := range r.h.Starships {
-		l[i] = &starshipResolver{starshipData[id]}
-	}
-	return &l
-}
+	s.Resolver("Query", "createReview", func(r *Resolver, args *struct {
+		Episode string
+		Review  *reviewInput
+	}) *review {
+		review := &review{
+			stars:      args.Review.Stars,
+			commentary: args.Review.Commentary,
+		}
+		reviews[args.Episode] = append(reviews[args.Episode], review)
+		return review
+	})
 
-type droidResolver struct {
-	d *droid
-}
+	s.ResolverField("Human", "id", "ID")
+	s.ResolverField("Human", "name", "Name")
+	s.ResolverField("Human", "appearsIn", "AppearsIn")
 
-func (r *droidResolver) ID() graphql.ID {
-	return r.d.ID
-}
+	s.Resolver("Human", "height", func(h *human, args *struct{ Unit string }) float64 {
+		return convertLength(h.Height, args.Unit)
+	})
 
-func (r *droidResolver) Name() string {
-	return r.d.Name
-}
+	s.Resolver("Human", "mass", func(h *human) *float64 {
+		if h.Mass == 0 {
+			return nil
+		}
+		f := float64(h.Mass)
+		return &f
+	})
 
-func (r *droidResolver) Friends() *[]*characterResolver {
-	return resolveCharacters(r.d.Friends)
-}
+	s.Resolver("Human", "friends", func(h *human) *[]interface{} {
+		return resolveCharacters(h.Friends)
+	})
 
-func (r *droidResolver) FriendsConnection(args *friendsConenctionArgs) (*friendsConnectionResolver, error) {
-	return newFriendsConnectionResolver(r.d.Friends, args)
-}
+	s.Resolver("Human", "friendsConnection", func(h *human, args *friendsConnectionArgs) (*friendsConnection, error) {
+		return newFriendsConnection(h.Friends, args)
+	})
 
-func (r *droidResolver) AppearsIn() []string {
-	return r.d.AppearsIn
-}
+	s.Resolver("Human", "starships", func(h *human) *[]*starship {
+		l := make([]*starship, len(h.Starships))
+		for i, id := range h.Starships {
+			l[i] = starshipData[id]
+		}
+		return &l
+	})
 
-func (r *droidResolver) PrimaryFunction() *string {
-	if r.d.PrimaryFunction == "" {
-		return nil
-	}
-	return &r.d.PrimaryFunction
-}
+	s.ResolverField("Droid", "id", "ID")
+	s.ResolverField("Droid", "name", "Name")
+	s.ResolverField("Droid", "appearsIn", "AppearsIn")
 
-type starshipResolver struct {
-	s *starship
-}
+	s.Resolver("Droid", "friends", func(d *droid) *[]interface{} {
+		return resolveCharacters(d.Friends)
+	})
 
-func (r *starshipResolver) ID() graphql.ID {
-	return r.s.ID
-}
+	s.Resolver("Droid", "friendsConnection", func(d *droid, args *friendsConnectionArgs) (*friendsConnection, error) {
+		return newFriendsConnection(d.Friends, args)
+	})
 
-func (r *starshipResolver) Name() string {
-	return r.s.Name
-}
+	s.Resolver("Droid", "primaryFunction", func(d *droid) *string {
+		if d.PrimaryFunction == "" {
+			return nil
+		}
+		return &d.PrimaryFunction
+	})
 
-func (r *starshipResolver) Length(args *struct{ Unit string }) float64 {
-	return convertLength(r.s.Length, args.Unit)
-}
+	s.ResolverField("Starship", "id", "ID")
+	s.ResolverField("Starship", "name", "Name")
+	s.Resolver("Starship", "length", func(s *starship, args *struct{ Unit string }) float64 {
+		return convertLength(s.Length, args.Unit)
+	})
 
-type searchResultResolver struct {
-	result interface{}
-}
+	s.ResolverField("Review", "stars", "Stars")
+	s.ResolverField("Review", "commentary", "Commentary")
 
-func (r *searchResultResolver) ToHuman() (*humanResolver, bool) {
-	res, ok := r.result.(*humanResolver)
-	return res, ok
-}
+	s.Resolver("FriendsConnection", "totalCount", func(c *friendsConnection) int32 {
+		return int32(len(c.IDs))
+	})
 
-func (r *searchResultResolver) ToDroid() (*droidResolver, bool) {
-	res, ok := r.result.(*droidResolver)
-	return res, ok
-}
+	s.Resolver("FriendsConnection", "edges", func(c *friendsConnection) *[]*friendsEdge {
+		l := make([]*friendsEdge, c.To-c.From)
+		for i := range l {
+			l[i] = &friendsEdge{
+				Cursor: encodeCursor(c.From + i),
+				ID:     c.IDs[c.From+i],
+			}
+		}
+		return &l
+	})
 
-func (r *searchResultResolver) ToStarship() (*starshipResolver, bool) {
-	res, ok := r.result.(*starshipResolver)
-	return res, ok
+	s.Resolver("FriendsConnection", "friends", func(c *friendsConnection) *[]interface{} {
+		return resolveCharacters(c.IDs[c.From:c.To])
+	})
+
+	s.Resolver("FriendsConnection", "pageInfo", func(c *friendsConnection) *pageInfo {
+		start := encodeCursor(c.From)
+		end := encodeCursor(c.To - 1)
+		return &pageInfo{
+			StartCursor: &start,
+			EndCursor:   &end,
+			HasNextPage: c.To < len(c.IDs),
+		}
+	})
+
+	s.ResolverField("FriendsEdge", "cursor", "Cursor")
+	s.Resolver("FriendsEdge", "node", func(e *friendsEdge) interface{} {
+		return resolveCharacter(e.ID)
+	})
+
+	s.ResolverField("PageInfo", "startCursor", "StartCursor")
+	s.ResolverField("PageInfo", "endCursor", "EndCursor")
+	s.ResolverField("PageInfo", "hasNextPage", "HasNextPage")
+
+	return s
 }
 
 func convertLength(meters float64, unit string) float64 {
@@ -512,8 +468,8 @@ func convertLength(meters float64, unit string) float64 {
 	}
 }
 
-func resolveCharacters(ids []graphql.ID) *[]*characterResolver {
-	var characters []*characterResolver
+func resolveCharacters(ids []graphql.ID) *[]interface{} {
+	var characters []interface{}
 	for _, id := range ids {
 		if c := resolveCharacter(id); c != nil {
 			characters = append(characters, c)
@@ -522,35 +478,33 @@ func resolveCharacters(ids []graphql.ID) *[]*characterResolver {
 	return &characters
 }
 
-func resolveCharacter(id graphql.ID) *characterResolver {
+func resolveCharacter(id graphql.ID) interface{} {
 	if h, ok := humanData[id]; ok {
-		return &characterResolver{&humanResolver{h}}
+		return h
 	}
 	if d, ok := droidData[id]; ok {
-		return &characterResolver{&droidResolver{d}}
+		return d
 	}
 	return nil
 }
 
-type reviewResolver struct {
-	r *review
+type friendsConnectionArgs struct {
+	First *int32
+	After *graphql.ID
 }
 
-func (r *reviewResolver) Stars() int32 {
-	return r.r.stars
+type friendsConnection struct {
+	IDs  []graphql.ID
+	From int
+	To   int
 }
 
-func (r *reviewResolver) Commentary() *string {
-	return r.r.commentary
+type friendsEdge struct {
+	Cursor graphql.ID
+	ID     graphql.ID
 }
 
-type friendsConnectionResolver struct {
-	ids  []graphql.ID
-	from int
-	to   int
-}
-
-func newFriendsConnectionResolver(ids []graphql.ID, args *friendsConenctionArgs) (*friendsConnectionResolver, error) {
+func newFriendsConnection(ids []graphql.ID, args *friendsConnectionArgs) (*friendsConnection, error) {
 	from := 0
 	if args.After != nil {
 		b, err := base64.StdEncoding.DecodeString(string(*args.After))
@@ -572,73 +526,21 @@ func newFriendsConnectionResolver(ids []graphql.ID, args *friendsConenctionArgs)
 		}
 	}
 
-	return &friendsConnectionResolver{
-		ids:  ids,
-		from: from,
-		to:   to,
+	return &friendsConnection{
+		IDs:  ids,
+		From: from,
+		To:   to,
 	}, nil
-}
-
-func (r *friendsConnectionResolver) TotalCount() int32 {
-	return int32(len(r.ids))
-}
-
-func (r *friendsConnectionResolver) Edges() *[]*friendsEdgeResolver {
-	l := make([]*friendsEdgeResolver, r.to-r.from)
-	for i := range l {
-		l[i] = &friendsEdgeResolver{
-			cursor: encodeCursor(r.from + i),
-			id:     r.ids[r.from+i],
-		}
-	}
-	return &l
-}
-
-func (r *friendsConnectionResolver) Friends() *[]*characterResolver {
-	return resolveCharacters(r.ids[r.from:r.to])
-}
-
-func (r *friendsConnectionResolver) PageInfo() *pageInfoResolver {
-	return &pageInfoResolver{
-		startCursor: encodeCursor(r.from),
-		endCursor:   encodeCursor(r.to - 1),
-		hasNextPage: r.to < len(r.ids),
-	}
 }
 
 func encodeCursor(i int) graphql.ID {
 	return graphql.ID(base64.StdEncoding.EncodeToString([]byte(fmt.Sprintf("cursor%d", i+1))))
 }
 
-type friendsEdgeResolver struct {
-	cursor graphql.ID
-	id     graphql.ID
-}
-
-func (r *friendsEdgeResolver) Cursor() graphql.ID {
-	return r.cursor
-}
-
-func (r *friendsEdgeResolver) Node() *characterResolver {
-	return resolveCharacter(r.id)
-}
-
-type pageInfoResolver struct {
-	startCursor graphql.ID
-	endCursor   graphql.ID
-	hasNextPage bool
-}
-
-func (r *pageInfoResolver) StartCursor() *graphql.ID {
-	return &r.startCursor
-}
-
-func (r *pageInfoResolver) EndCursor() *graphql.ID {
-	return &r.endCursor
-}
-
-func (r *pageInfoResolver) HasNextPage() bool {
-	return r.hasNextPage
+type pageInfo struct {
+	StartCursor *graphql.ID
+	EndCursor   *graphql.ID
+	HasNextPage bool
 }
 
 type reviewInput struct {
